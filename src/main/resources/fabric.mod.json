@@ -6,7 +6,8 @@
 	"description": "Find stronghold with one eye of ender",
 	"authors": [
 		"Hopper4et",
-		"Fanya"
+		"Fanya",
+		"Junner"
 	],
 	"contact": {
 		"github": "https://github.com/FanyaOff/one-eye-stronghold-finder"
@@ -21,7 +22,7 @@
 	},
 	"depends": {
 		"fabricloader": ">=0.16.2",
-		"minecraft": "~1.21.1",
+		"minecraft": "~1.21.9",
 		"java": ">=21",
 		"fabric-api": "*"
 	}

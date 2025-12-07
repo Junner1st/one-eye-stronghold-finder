@@ -11,10 +11,10 @@ import net.minecraft.util.math.Vec3d;
 
 import java.awt.*;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 
 public class MainThread extends Thread {
+    public static final boolean DEBUG = true;
     private final Entity eyeOfEnder;
     public MainThread(Entity eyeOfEnder) {
         this.eyeOfEnder = eyeOfEnder;
@@ -22,11 +22,25 @@ public class MainThread extends Thread {
 
     @Override
     public void run() {
+        debugMessage("Thread started for Eye #" + eyeOfEnder.getId());
+        if (eyeOfEnder.isRemoved()) {
+            debugMessage("Eye entity was removed before first capture");
+            return;
+        }
         //взятие первых и вторых координат
-        Vec3d pos1 = eyeOfEnder.getPos();
+        Vec3d pos1 = captureEyePosition();
+        debugMessage("Captured first position " + formatVec(pos1));
         try {Thread.sleep(4000);} catch (InterruptedException e) {return;}
-        Vec3d pos2 = eyeOfEnder.getPos();
-        if (pos1.x == pos2.x || pos1.z == pos2.z) return;
+        if (eyeOfEnder.isRemoved()) {
+            debugMessage("Eye entity removed before second capture");
+            return;
+        }
+        Vec3d pos2 = captureEyePosition();
+        debugMessage("Captured second position " + formatVec(pos2));
+        if (pos1.x == pos2.x || pos1.z == pos2.z) {
+            debugMessage("Eye positions did not diverge enough; aborting");
+            return;
+        }
 
         //менять координаты для точности
         boolean isReverse = false;
@@ -34,50 +48,73 @@ public class MainThread extends Thread {
             pos1 = new Vec3d(pos1.z, pos1.y, pos1.x);
             pos2 = new Vec3d(pos2.z, pos2.y, pos2.x);
             isReverse = true;
+            debugMessage("Swapped axes for improved precision");
         }
 
         //создаёт искателя координат
+        double slope = (pos2.z - pos1.z) / (pos2.x - pos1.x);
+        int signX = (pos2.x - pos1.x) < 0 ? -1 : 1;
+        debugMessage(String.format("Slope=%.5f signX=%d", slope, signX));
         GridFinder finder = new GridFinder(
                 pos1.x, pos1.z,
-                (pos2.z - pos1.z) / (pos2.x - pos1.x),
-                (pos2.x - pos1.x) < 0 ? -1 : 1
+                slope,
+                signX
         );
 
         //идёт до кольца
-        for (int i = 0; !finder.isInRing(); i++) {
+        int stepsToRing = 0;
+        while (!finder.isInRing()) {
             finder.next();
-            if (i > 500) return;
+            stepsToRing++;
+            if (stepsToRing > 500) {
+                debugMessage("Aborted: exceeded 500 steps before entering ring");
+                return;
+            }
         }
+        debugMessage("Reached stronghold ring after " + stepsToRing + " iterations");
 
         //идёт по кольцу
         ArrayList<Stronghold> strongholds = new ArrayList<>();
+        int ringSamples = 0;
         while (finder.isInRing()) {
             Stronghold stronghold = finder.next();
-            if (stronghold.accuracy > 2) strongholds.add(stronghold);
+            strongholds.add(stronghold);
+            ringSamples++;
         }
-        if (strongholds.isEmpty()) return;
+        debugMessage("Collected " + ringSamples + " samples while traversing ring");
+        if (strongholds.isEmpty()) {
+            debugMessage("No strongholds collected");
+            return;
+        }
 
         //сортирует
-        strongholds.sort(Comparator.comparing(a -> a.accuracy));
-        Collections.reverse(strongholds);
+        strongholds.sort(Comparator.comparingDouble((Stronghold a) -> a.accuracy).reversed());
+        debugMessage(String.format(
+                "Top accuracy %.2f, 5th accuracy %.2f",
+                strongholds.get(0).accuracy,
+                strongholds.get(Math.min(4, strongholds.size() - 1)).accuracy
+        ));
 
         //создание переменных для цвета чата
-        double minAccuracy = 0;
-        double colorRatio = 0;
-        if (strongholds.size() > 1) {
-            minAccuracy = strongholds.get(Math.min(4, strongholds.size() - 1)).accuracy;
-            colorRatio = (strongholds.get(0).accuracy - minAccuracy) / 510;
+        double topAccuracy = strongholds.get(0).accuracy;
+        double minAccuracy = strongholds.get(Math.min(4, strongholds.size() - 1)).accuracy;
+        double accuracySpread = topAccuracy - minAccuracy;
+        if (!Double.isFinite(accuracySpread) || accuracySpread <= 0) {
+            accuracySpread = 1;
         }
 
         //вывод информации в чат
-        ClientPlayerEntity player = MinecraftClient.getInstance().player;
-        if (player == null) return;
-        player.sendMessage(Text.literal("=== One Eye Stronghold Finder ===").setStyle(
-                Style.EMPTY.withColor(new Color(155, 251, 255).getRGB())
-        ), false);
+        sendChat(Text.literal("=== One Eye Stronghold Finder ===").setStyle(
+            Style.EMPTY.withColor(new Color(155, 251, 255).getRGB())
+        ));
 
         for (int i = 0; i < Math.min(strongholds.size(), 5); i++) {
-            int color = (strongholds.size() > 1) ? (int) ((strongholds.get(i).accuracy - minAccuracy) / colorRatio) : 510;
+            double normalized = strongholds.size() > 1
+                ? (strongholds.get(i).accuracy - minAccuracy) / accuracySpread
+                : 1;
+            if (!Double.isFinite(normalized)) normalized = 1;
+            normalized = Math.max(0, Math.min(1, normalized));
+            int color = (int) Math.round(normalized * 510);
 
             int overworldX = (isReverse ? strongholds.get(i).z : strongholds.get(i).x) + 3;
             int overworldZ = (isReverse ? strongholds.get(i).x : strongholds.get(i).z) + 3;
@@ -85,19 +122,51 @@ public class MainThread extends Thread {
             int netherZ = overworldZ / 8;
 
             String clickText = overworldX + " ~ " + overworldZ;
+            String accuracyText = Double.isFinite(strongholds.get(i).accuracy)
+                ? String.format("%.2f", strongholds.get(i).accuracy)
+                : "INF";
 
-            player.sendMessage(Text.literal(String.format(
-                    "X: %- 6d Z: %- 6d (Nether: X: %- 6d Z: %- 6d) accuracy: %d",
+            sendChat(Text.literal(String.format(
+                "X: %- 6d Z: %- 6d (Nether: X: %- 6d Z: %- 6d) accuracy: %s",
                     overworldX, overworldZ,
                     netherX, netherZ,
-                    strongholds.get(i).accuracy
+                accuracyText
             )).setStyle(Style.EMPTY
-                    .withColor(new Color(Math.min(255, 510 - color), Math.min(255, color), 2).getRGB())
+                .withColor(new Color(
+                    Math.max(0, Math.min(255, 510 - color)),
+                    Math.max(0, Math.min(255, color)),
+                    2
+                ).getRGB())
                     .withHoverEvent(new HoverEvent.ShowText(Text.literal("Copy to clipboard")))
                     .withClickEvent(new ClickEvent.CopyToClipboard(clickText))
-            ), false);
+            ));
         }
+        debugMessage("Finished sending results");
     }
 
+    private Vec3d captureEyePosition() {
+        return new Vec3d(eyeOfEnder.getX(), eyeOfEnder.getY(), eyeOfEnder.getZ());
+    }
+
+    private void debugMessage(String message) {
+        if (!DEBUG) return;
+        sendChat(Text.literal("[OESF DEBUG] " + message).setStyle(
+                Style.EMPTY.withColor(Color.GRAY.getRGB())
+        ));
+    }
+
+    private String formatVec(Vec3d vec3d) {
+        return String.format("(%.2f, %.2f, %.2f)", vec3d.x, vec3d.y, vec3d.z);
+    }
+
+    private void sendChat(Text text) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null) return;
+        client.execute(() -> {
+            ClientPlayerEntity player = client.player;
+            if (player == null) return;
+            player.sendMessage(text, false);
+        });
+    }
 
 }

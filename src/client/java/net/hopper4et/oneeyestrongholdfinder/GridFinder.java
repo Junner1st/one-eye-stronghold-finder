@@ -17,7 +17,9 @@ public class GridFinder {
         distance++;
         x = (Math.round(originX / 16) + distance * signX) * 16;
         z = (x - originX) * ratio + originZ;
-        return new Stronghold((long) (1 / (Math.abs(alignToGrid(z) - z))), alignToGrid(x), alignToGrid(z));
+        double error = Math.abs(alignToGrid(z) - z);
+        double accuracy = error == 0 ? Double.POSITIVE_INFINITY : 1.0 / error;
+        return new Stronghold(accuracy, alignToGrid(x), alignToGrid(z));
     }
     public boolean isInRing() {
         double distance = Math.round(Math.sqrt(Math.pow(x, 2) + Math.pow(z, 2)));

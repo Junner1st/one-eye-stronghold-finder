@@ -3,10 +3,6 @@ A client-side fabric mod which allows you to find stronghold with only one Eye o
 
 Fork of [Hopper4et Mod](https://github.com/Hopper4et/one-eye-stronghold-finder)
 
-# Fixes
-- 1.21.x support
-- Displaying coordinats in the nether world
-
 
 ## Overview
 
