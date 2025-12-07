@@ -7,16 +7,27 @@ import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.text.Style;
 import net.minecraft.text.Text;
+import net.minecraft.util.math.Vec3d;
 
 import java.awt.*;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class OneEyeStrongholdFinderClient implements ClientModInitializer {
+
+    private static final Map<Integer, CompletableFuture<Vec3d>> eyeRemovalPositions = new ConcurrentHashMap<>();
 
 
 	@Override
 	public void onInitializeClient() {
 		ClientEntityEvents.ENTITY_LOAD.register((entity, world) -> {
 			if (entity.getType() != EntityType.EYE_OF_ENDER) return;
+			CompletableFuture<Vec3d> removalFuture = new CompletableFuture<>();
+			CompletableFuture<Vec3d> previous = eyeRemovalPositions.put(entity.getId(), removalFuture);
+			if (previous != null && !previous.isDone()) {
+				previous.complete(new Vec3d(entity.getX(), entity.getY(), entity.getZ()));
+			}
 			if (MainThread.DEBUG) {
 				MinecraftClient client = MinecraftClient.getInstance();
 				if (client != null) {
@@ -31,7 +42,15 @@ public class OneEyeStrongholdFinderClient implements ClientModInitializer {
 					});
 				}
 			}
-			new Thread(new MainThread(entity)).start();
+			new Thread(new MainThread(entity, removalFuture)).start();
+		});
+
+		ClientEntityEvents.ENTITY_UNLOAD.register((entity, world) -> {
+			if (entity.getType() != EntityType.EYE_OF_ENDER) return;
+			CompletableFuture<Vec3d> future = eyeRemovalPositions.remove(entity.getId());
+			if (future != null && !future.isDone()) {
+				future.complete(new Vec3d(entity.getX(), entity.getY(), entity.getZ()));
+			}
 		});
 	}
 }

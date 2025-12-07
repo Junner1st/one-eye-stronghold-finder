@@ -12,12 +12,19 @@ import net.minecraft.util.math.Vec3d;
 import java.awt.*;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 public class MainThread extends Thread {
     public static final boolean DEBUG = true;
+    private static final int MAX_STEPS_TO_RING = 1600;
     private final Entity eyeOfEnder;
-    public MainThread(Entity eyeOfEnder) {
+    private final CompletableFuture<Vec3d> removalPositionFuture;
+    public MainThread(Entity eyeOfEnder, CompletableFuture<Vec3d> removalPositionFuture) {
         this.eyeOfEnder = eyeOfEnder;
+        this.removalPositionFuture = removalPositionFuture;
     }
 
     @Override
@@ -30,13 +37,8 @@ public class MainThread extends Thread {
         //взятие первых и вторых координат
         Vec3d pos1 = captureEyePosition();
         debugMessage("Captured first position " + formatVec(pos1));
-        try {Thread.sleep(4000);} catch (InterruptedException e) {return;}
-        if (eyeOfEnder.isRemoved()) {
-            debugMessage("Eye entity removed before second capture");
-            return;
-        }
-        Vec3d pos2 = captureEyePosition();
-        debugMessage("Captured second position " + formatVec(pos2));
+        Vec3d pos2 = waitForRemovalPosition(pos1);
+        debugMessage("Captured final position before removal " + formatVec(pos2));
         if (pos1.x == pos2.x || pos1.z == pos2.z) {
             debugMessage("Eye positions did not diverge enough; aborting");
             return;
@@ -66,8 +68,13 @@ public class MainThread extends Thread {
         while (!finder.isInRing()) {
             finder.next();
             stepsToRing++;
-            if (stepsToRing > 500) {
-                debugMessage("Aborted: exceeded 500 steps before entering ring");
+            if (stepsToRing > MAX_STEPS_TO_RING) {
+                double distance = Math.hypot(finder.x, finder.z);
+                debugMessage(String.format(
+                        "Aborted: exceeded %d steps before entering ring (distance %.2f)",
+                        MAX_STEPS_TO_RING,
+                        distance
+                ));
                 return;
             }
         }
@@ -157,6 +164,31 @@ public class MainThread extends Thread {
 
     private String formatVec(Vec3d vec3d) {
         return String.format("(%.2f, %.2f, %.2f)", vec3d.x, vec3d.y, vec3d.z);
+    }
+
+    private Vec3d waitForRemovalPosition(Vec3d fallback) {
+        if (removalPositionFuture == null) {
+            debugMessage("Missing removal future; using fallback position");
+            return fallback;
+        }
+        try {
+            Vec3d result = removalPositionFuture.get(10, TimeUnit.SECONDS);
+            if (result == null) {
+                debugMessage("Removal future completed with null; using fallback");
+                return fallback;
+            }
+            return result;
+        } catch (TimeoutException e) {
+            debugMessage("Timed out waiting for unload event; using fallback");
+            return fallback;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            debugMessage("Interrupted while waiting for unload event");
+            return fallback;
+        } catch (ExecutionException e) {
+            debugMessage("Error waiting for unload event: " + e.getMessage());
+            return fallback;
+        }
     }
 
     private void sendChat(Text text) {
