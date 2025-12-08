@@ -17,6 +17,16 @@ import java.util.concurrent.ConcurrentHashMap;
 public class OneEyeStrongholdFinderClient implements ClientModInitializer {
 
     private static final Map<Integer, CompletableFuture<Vec3d>> eyeRemovalPositions = new ConcurrentHashMap<>();
+	private static final boolean DEBUG = true;
+	private static volatile boolean debugMode = DEBUG;
+
+	public static void setDebugMode(boolean enabled) {
+		debugMode = enabled;
+	}
+
+	public static boolean isDebugMode() {
+		return debugMode;
+	}
 
 
 	@Override
@@ -28,7 +38,7 @@ public class OneEyeStrongholdFinderClient implements ClientModInitializer {
 			if (previous != null && !previous.isDone()) {
 				previous.complete(new Vec3d(entity.getX(), entity.getY(), entity.getZ()));
 			}
-			if (MainThread.DEBUG) {
+			if (isDebugMode()) {
 				MinecraftClient client = MinecraftClient.getInstance();
 				if (client != null) {
 					client.execute(() -> {
@@ -42,7 +52,7 @@ public class OneEyeStrongholdFinderClient implements ClientModInitializer {
 					});
 				}
 			}
-			new Thread(new MainThread(entity, removalFuture)).start();
+			new Thread(new MainThread(entity, removalFuture, isDebugMode())).start();
 		});
 
 		ClientEntityEvents.ENTITY_UNLOAD.register((entity, world) -> {

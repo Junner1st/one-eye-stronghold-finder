@@ -5,6 +5,7 @@ import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.Entity;
 import net.minecraft.text.ClickEvent;
 import net.minecraft.text.HoverEvent;
+import net.minecraft.text.MutableText;
 import net.minecraft.text.Style;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.Vec3d;
@@ -18,13 +19,16 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 public class MainThread extends Thread {
-    public static final boolean DEBUG = true;
-    private static final int MAX_STEPS_TO_RING = 1600;
+    private static final int MAX_STEPS_TO_RING = 1200;
+    private static final double MAX_STRONGHOLD_RADIUS = 24336;
+    private static final double SUGGESTED_RETURN_RANGE = 30000;
     private final Entity eyeOfEnder;
     private final CompletableFuture<Vec3d> removalPositionFuture;
-    public MainThread(Entity eyeOfEnder, CompletableFuture<Vec3d> removalPositionFuture) {
+    private final boolean debugEnabled;
+    public MainThread(Entity eyeOfEnder, CompletableFuture<Vec3d> removalPositionFuture, boolean debugEnabled) {
         this.eyeOfEnder = eyeOfEnder;
         this.removalPositionFuture = removalPositionFuture;
+        this.debugEnabled = debugEnabled;
     }
 
     @Override
@@ -34,7 +38,7 @@ public class MainThread extends Thread {
             debugMessage("Eye entity was removed before first capture");
             return;
         }
-        //взятие первых и вторых координат
+        //capture initial and final Eye positions
         Vec3d pos1 = captureEyePosition();
         debugMessage("Captured first position " + formatVec(pos1));
         Vec3d pos2 = waitForRemovalPosition(pos1);
@@ -44,7 +48,7 @@ public class MainThread extends Thread {
             return;
         }
 
-        //менять координаты для точности
+        //swap axes when Z movement dominates for better precision
         boolean isReverse = false;
         if (Math.abs(pos1.z - pos2.z) - Math.abs(pos1.x - pos2.x) > 0) {
             pos1 = new Vec3d(pos1.z, pos1.y, pos1.x);
@@ -53,7 +57,7 @@ public class MainThread extends Thread {
             debugMessage("Swapped axes for improved precision");
         }
 
-        //создаёт искателя координат
+        //initialize the grid traversal helper
         double slope = (pos2.z - pos1.z) / (pos2.x - pos1.x);
         int signX = (pos2.x - pos1.x) < 0 ? -1 : 1;
         debugMessage(String.format("Slope=%.5f signX=%d", slope, signX));
@@ -63,7 +67,7 @@ public class MainThread extends Thread {
                 signX
         );
 
-        //идёт до кольца
+        //walk the line until we hit a stronghold ring
         int stepsToRing = 0;
         while (!finder.isInRing()) {
             finder.next();
@@ -75,12 +79,13 @@ public class MainThread extends Thread {
                         MAX_STEPS_TO_RING,
                         distance
                 ));
+                warnOutsideRing(distance);
                 return;
             }
         }
         debugMessage("Reached stronghold ring after " + stepsToRing + " iterations");
 
-        //идёт по кольцу
+        //walk along the ring collecting candidates
         ArrayList<Stronghold> strongholds = new ArrayList<>();
         int ringSamples = 0;
         while (finder.isInRing()) {
@@ -94,7 +99,7 @@ public class MainThread extends Thread {
             return;
         }
 
-        //сортирует
+        //sort candidates by accuracy
         strongholds.sort(Comparator.comparingDouble((Stronghold a) -> a.accuracy).reversed());
         debugMessage(String.format(
                 "Top accuracy %.2f, 5th accuracy %.2f",
@@ -102,7 +107,7 @@ public class MainThread extends Thread {
                 strongholds.get(Math.min(4, strongholds.size() - 1)).accuracy
         ));
 
-        //создание переменных для цвета чата
+        //derive chat gradient values
         double topAccuracy = strongholds.get(0).accuracy;
         double minAccuracy = strongholds.get(Math.min(4, strongholds.size() - 1)).accuracy;
         double accuracySpread = topAccuracy - minAccuracy;
@@ -110,7 +115,7 @@ public class MainThread extends Thread {
             accuracySpread = 1;
         }
 
-        //вывод информации в чат
+        //print the final results
         sendChat(Text.literal("=== One Eye Stronghold Finder ===").setStyle(
             Style.EMPTY.withColor(new Color(155, 251, 255).getRGB())
         ));
@@ -156,7 +161,7 @@ public class MainThread extends Thread {
     }
 
     private void debugMessage(String message) {
-        if (!DEBUG) return;
+        if (!debugEnabled) return;
         sendChat(Text.literal("[OESF DEBUG] " + message).setStyle(
                 Style.EMPTY.withColor(Color.GRAY.getRGB())
         ));
@@ -164,6 +169,28 @@ public class MainThread extends Thread {
 
     private String formatVec(Vec3d vec3d) {
         return String.format("(%.2f, %.2f, %.2f)", vec3d.x, vec3d.y, vec3d.z);
+    }
+
+    private void warnOutsideRing(double distanceFromOrigin) {
+        if (distanceFromOrigin <= MAX_STRONGHOLD_RADIUS) {
+            sendChat(Text.literal(
+                    "[OESF] Can not calculate the position of stronghold." +
+                            "Please report this issue: https://github.com/Junner1st/one-eye-stronghold-finder/issues"
+            ).setStyle(Style.EMPTY.withColor(new Color(255, 120, 120).getRGB())));
+            return;
+        }
+        MutableText warning = distanceFromOrigin > SUGGESTED_RETURN_RANGE
+            ? Text.literal(String.format(
+                "[OESF] You are %.0f blocks from spawn. Travel inside +/-%.0f (X,Z) before throwing another eye.",
+                distanceFromOrigin,
+                SUGGESTED_RETURN_RANGE
+            ))
+            : Text.literal(String.format(
+                "[OESF] Strongholds only generate within %.0f blocks. Move closer to spawn (inside +/-%.0f) and retry.",
+                MAX_STRONGHOLD_RADIUS,
+                SUGGESTED_RETURN_RANGE
+            ));
+        sendChat(warning.setStyle(Style.EMPTY.withColor(new Color(255, 200, 80).getRGB())));
     }
 
     private Vec3d waitForRemovalPosition(Vec3d fallback) {

@@ -4,7 +4,8 @@ A client-side fabric mod which allows you to find stronghold with only one Eye o
 Fork of [Hopper4et Mod](https://github.com/Hopper4et/one-eye-stronghold-finder)
 
 ## Fixes
-- pos2 record logic 
+- pos2 record logic
+- add warnning and report site
 
 ## Overview
 
@@ -98,3 +99,13 @@ X: 1240   Z: 5680   (Nether: X: 155   Z: 710)   accuracy: 90
    
 ![demo](https://github.com/user-attachments/assets/1e0b2afb-9917-4131-83bc-c7aefae849a4)
 
+
+## Build
+
+```
+./gradlew --no-daemon build
+```
+
+And you can find your module at `./build/libs/`
+
+To turn on debug mode, turn `private static final boolean DEBUG = false;` to `true` inside `OneEyeStrongholdFinderClient.java`.
