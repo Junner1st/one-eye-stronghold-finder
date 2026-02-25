@@ -17,7 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class OneEyeStrongholdFinderClient implements ClientModInitializer {
 
     private static final Map<Integer, CompletableFuture<Vec3d>> eyeRemovalPositions = new ConcurrentHashMap<>();
-	private static final boolean DEBUG = true;
+	private static final boolean DEBUG = false;
 	private static volatile boolean debugMode = DEBUG;
 
 	public static void setDebugMode(boolean enabled) {
